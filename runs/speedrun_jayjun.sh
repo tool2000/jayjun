@@ -126,7 +126,7 @@ echo "Step 4: Pretraining d20 model (bilingual)"
 echo "=============================================="
 
 # Number of GPUs
-NPROC_PER_NODE=8
+NPROC_PER_NODE=1
 
 # Pretrain the d20 model
 # Note: The dataloader will use NANOCHAT_LANG_RATIO for 70:30 mixing
