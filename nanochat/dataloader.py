@@ -22,10 +22,17 @@ Fallback to (1) if you have very limited data AND long documents.
 """
 
 import torch
+import random
 import pyarrow.parquet as pq
 
 from nanochat.common import get_dist_info
-from nanochat.dataset import list_parquet_files
+from nanochat.dataset import (
+    list_parquet_files,
+    list_parquet_files_ko,
+    DATA_DIR,
+    DATA_DIR_KO,
+)
+
 
 def _document_batches(split, resume_state_dict, tokenizer_batch_size):
     """
@@ -38,12 +45,18 @@ def _document_batches(split, resume_state_dict, tokenizer_batch_size):
     ddp, ddp_rank, ddp_local_rank, ddp_world_size = get_dist_info()
 
     parquet_paths = list_parquet_files()
-    assert len(parquet_paths) != 0, "No dataset parquet files found, did you run dataset.py?"
+    assert len(parquet_paths) != 0, (
+        "No dataset parquet files found, did you run dataset.py?"
+    )
     parquet_paths = parquet_paths[:-1] if split == "train" else parquet_paths[-1:]
 
     resume_pq_idx = resume_state_dict["pq_idx"] if resume_state_dict is not None else 0
-    resume_rg_idx = resume_state_dict["rg_idx"] if resume_state_dict is not None else None
-    resume_epoch = resume_state_dict.get("epoch", 1) if resume_state_dict is not None else 1
+    resume_rg_idx = (
+        resume_state_dict["rg_idx"] if resume_state_dict is not None else None
+    )
+    resume_epoch = (
+        resume_state_dict.get("epoch", 1) if resume_state_dict is not None else 1
+    )
     first_pass = True
     pq_idx = resume_pq_idx
     epoch = resume_epoch
@@ -66,16 +79,147 @@ def _document_batches(split, resume_state_dict, tokenizer_batch_size):
                 rg_idx = ddp_rank
             while rg_idx < pf.num_row_groups:
                 rg = pf.read_row_group(rg_idx)
-                batch = rg.column('text').to_pylist()
+                batch = rg.column("text").to_pylist()
                 for i in range(0, len(batch), tokenizer_batch_size):
-                    yield batch[i:i+tokenizer_batch_size], (pq_idx, rg_idx, epoch)
+                    yield batch[i : i + tokenizer_batch_size], (pq_idx, rg_idx, epoch)
                 rg_idx += ddp_world_size
             pq_idx += 1
         first_pass = False
         epoch += 1
 
 
-def tokenizing_distributed_data_loader_with_state(tokenizer, B, T, split, tokenizer_threads=4, tokenizer_batch_size=128, device="cuda", resume_state_dict=None):
+def _document_batches_bilingual(
+    split, resume_state_dict, tokenizer_batch_size, en_ratio=0.7, seed=42
+):
+    """
+    Infinite iterator over document batches with bilingual mixing (English + Korean).
+
+    Args:
+        split: "train" or "val"
+        resume_state_dict: state for resuming (currently only tracks English position)
+        tokenizer_batch_size: batch size for tokenization
+        en_ratio: ratio of English samples (0.7 = 70% English, 30% Korean)
+        seed: random seed for reproducible mixing
+
+    Yields:
+        (text_batch, (pq_idx, rg_idx, epoch)) - mixed English and Korean documents
+    """
+    ddp, ddp_rank, ddp_local_rank, ddp_world_size = get_dist_info()
+    rng = random.Random(seed + ddp_rank)  # different seed per rank for diversity
+
+    # Get parquet paths for both languages
+    en_paths = list_parquet_files(data_dir=DATA_DIR)
+    ko_paths = list_parquet_files_ko()
+
+    assert len(en_paths) != 0, (
+        "No English dataset parquet files found, did you run dataset.py?"
+    )
+    if not ko_paths and en_ratio < 1.0:
+        print(
+            f"WARNING: No Korean parquet files found in {DATA_DIR_KO}. Using English only."
+        )
+        en_ratio = 1.0
+
+    # Split train/val
+    en_paths = en_paths[:-1] if split == "train" else en_paths[-1:]
+    if ko_paths:
+        ko_paths = ko_paths[:-1] if split == "train" else ko_paths[-1:]
+
+    # Resume state (currently only tracks English)
+    resume_pq_idx = resume_state_dict["pq_idx"] if resume_state_dict is not None else 0
+    resume_rg_idx = (
+        resume_state_dict["rg_idx"] if resume_state_dict is not None else None
+    )
+    resume_epoch = (
+        resume_state_dict.get("epoch", 1) if resume_state_dict is not None else 1
+    )
+
+    def make_parquet_iterator(paths, start_pq=0, start_rg=None, first_pass_flag=True):
+        """Creates an iterator over parquet files with DDP sharding."""
+        pq_idx = start_pq
+        first_pass = first_pass_flag
+        epoch = 1
+
+        while True:  # infinite loop for multiple epochs
+            pq_idx = start_pq if first_pass else 0
+            while pq_idx < len(paths):
+                filepath = paths[pq_idx]
+                pf = pq.ParquetFile(filepath)
+
+                if first_pass and (start_rg is not None) and (pq_idx == start_pq):
+                    base_idx = start_rg // ddp_world_size
+                    base_idx += 1
+                    rg_idx = base_idx * ddp_world_size + ddp_rank
+                    if rg_idx >= pf.num_row_groups:
+                        pq_idx += 1
+                        continue
+                    start_rg = None
+                else:
+                    rg_idx = ddp_rank
+
+                while rg_idx < pf.num_row_groups:
+                    rg = pf.read_row_group(rg_idx)
+                    batch = rg.column("text").to_pylist()
+                    yield batch, (pq_idx, rg_idx, epoch)
+                    rg_idx += ddp_world_size
+                pq_idx += 1
+            first_pass = False
+            epoch += 1
+
+    # Create iterators
+    en_iter = make_parquet_iterator(en_paths, resume_pq_idx, resume_rg_idx, True)
+    ko_iter = make_parquet_iterator(ko_paths, 0, None, True) if ko_paths else None
+
+    # Buffers for mixing
+    en_buffer = []
+    ko_buffer = []
+    current_state = (0, 0, resume_epoch)
+
+    while True:
+        # Refill English buffer
+        while len(en_buffer) < tokenizer_batch_size * 2:
+            batch, state = next(en_iter)
+            en_buffer.extend(batch)
+            current_state = state
+
+        # Refill Korean buffer
+        if ko_iter is not None and en_ratio < 1.0:
+            while len(ko_buffer) < tokenizer_batch_size * 2:
+                batch, _ = next(ko_iter)
+                ko_buffer.extend(batch)
+
+        # Build mixed batch
+        mixed_batch = []
+        for _ in range(tokenizer_batch_size):
+            use_english = True
+            if en_buffer and ko_buffer:
+                use_english = rng.random() < en_ratio
+            elif ko_buffer:
+                use_english = False
+            elif not en_buffer:
+                break
+
+            if use_english and en_buffer:
+                mixed_batch.append(en_buffer.pop(0))
+            elif ko_buffer:
+                mixed_batch.append(ko_buffer.pop(0))
+            elif en_buffer:
+                mixed_batch.append(en_buffer.pop(0))
+
+        if mixed_batch:
+            yield mixed_batch, current_state
+
+
+def tokenizing_distributed_data_loader_with_state(
+    tokenizer,
+    B,
+    T,
+    split,
+    tokenizer_threads=4,
+    tokenizer_batch_size=128,
+    device="cuda",
+    resume_state_dict=None,
+):
     """
     Stream pretraining text from parquet files, tokenize, yield training batches.
 
@@ -93,15 +237,20 @@ def tokenizing_distributed_data_loader_with_state(tokenizer, B, T, split, tokeni
     pq_idx, rg_idx, epoch = 0, 0, 1
 
     while True:
-
         # Accumulate enough tokens
         while len(token_buffer) < needed_tokens:
             doc_batch, (pq_idx, rg_idx, epoch) = next(batches)
-            token_lists = tokenizer.encode(doc_batch, prepend=bos_token, num_threads=tokenizer_threads)
+            token_lists = tokenizer.encode(
+                doc_batch, prepend=bos_token, num_threads=tokenizer_threads
+            )
             for tokens in token_lists:
                 token_buffer.extend(tokens)
-        tokens = token_buffer[:needed_tokens] # Read B*T+1 tokens (+1 is only for the target for the last token)
-        token_buffer = token_buffer[B*T:] # Advance by B*T tokens, so we move exactly one window of B*T tokens over
+        tokens = token_buffer[
+            :needed_tokens
+        ]  # Read B*T+1 tokens (+1 is only for the target for the last token)
+        token_buffer = token_buffer[
+            B * T :
+        ]  # Advance by B*T tokens, so we move exactly one window of B*T tokens over
 
         # Package tokens into inputs and targets, yield
         use_cuda = device == "cuda"
@@ -113,15 +262,22 @@ def tokenizing_distributed_data_loader_with_state(tokenizer, B, T, split, tokeni
 
 def tokenizing_distributed_data_loader(*args, **kwargs):
     """Helper that omits state_dict from yields."""
-    for inputs, targets, state_dict in tokenizing_distributed_data_loader_with_state(*args, **kwargs):
+    for inputs, targets, state_dict in tokenizing_distributed_data_loader_with_state(
+        *args, **kwargs
+    ):
         yield inputs, targets
 
 
 def tokenizing_distributed_data_loader_with_state_bos_bestfit(
-    tokenizer, B, T, split,
-    tokenizer_threads=4, tokenizer_batch_size=128,
-    device="cuda", resume_state_dict=None,
-    buffer_size=1000
+    tokenizer,
+    B,
+    T,
+    split,
+    tokenizer_threads=4,
+    tokenizer_batch_size=128,
+    device="cuda",
+    resume_state_dict=None,
+    buffer_size=1000,
 ):
     """
     BOS-aligned dataloader with Best-Fit Cropping.
@@ -150,7 +306,9 @@ def tokenizing_distributed_data_loader_with_state_bos_bestfit(
     def refill_buffer():
         nonlocal pq_idx, rg_idx, epoch
         doc_batch, (pq_idx, rg_idx, epoch) = next(batches)
-        token_lists = tokenizer.encode(doc_batch, prepend=bos_token, num_threads=tokenizer_threads)
+        token_lists = tokenizer.encode(
+            doc_batch, prepend=bos_token, num_threads=tokenizer_threads
+        )
         for tokens in token_lists:
             doc_buffer.append(tokens)
 
@@ -179,7 +337,9 @@ def tokenizing_distributed_data_loader_with_state_bos_bestfit(
                     row.extend(doc)
                 else:
                     # No doc fits - crop shortest in buffer to fill remaining and minimize waste
-                    shortest_idx = min(range(len(doc_buffer)), key=lambda i: len(doc_buffer[i]))
+                    shortest_idx = min(
+                        range(len(doc_buffer)), key=lambda i: len(doc_buffer[i])
+                    )
                     doc = doc_buffer.pop(shortest_idx)
                     row.extend(doc[:remaining])
 
@@ -195,5 +355,166 @@ def tokenizing_distributed_data_loader_with_state_bos_bestfit(
 
 def tokenizing_distributed_data_loader_bos_bestfit(*args, **kwargs):
     """Helper that omits state_dict from yields."""
-    for inputs, targets, state_dict in tokenizing_distributed_data_loader_with_state_bos_bestfit(*args, **kwargs):
+    for (
+        inputs,
+        targets,
+        state_dict,
+    ) in tokenizing_distributed_data_loader_with_state_bos_bestfit(*args, **kwargs):
+        yield inputs, targets
+
+
+# =============================================================================
+# Bilingual data loaders (English + Korean)
+# =============================================================================
+
+
+def tokenizing_distributed_data_loader_bilingual_with_state(
+    tokenizer,
+    B,
+    T,
+    split,
+    tokenizer_threads=4,
+    tokenizer_batch_size=128,
+    device="cuda",
+    resume_state_dict=None,
+    en_ratio=0.7,
+    seed=42,
+):
+    """
+    Bilingual version of the streaming dataloader.
+    Mixes English and Korean documents according to en_ratio.
+
+    Args:
+        en_ratio: ratio of English samples (0.7 = 70% English, 30% Korean)
+        seed: random seed for reproducible mixing
+    """
+    assert split in ["train", "val"], "split must be 'train' or 'val'"
+
+    batches = _document_batches_bilingual(
+        split, resume_state_dict, tokenizer_batch_size, en_ratio, seed
+    )
+    needed_tokens = B * T + 1
+    bos_token = tokenizer.get_bos_token_id()
+    token_buffer = []
+    pq_idx, rg_idx, epoch = 0, 0, 1
+
+    while True:
+        while len(token_buffer) < needed_tokens:
+            doc_batch, (pq_idx, rg_idx, epoch) = next(batches)
+            token_lists = tokenizer.encode(
+                doc_batch, prepend=bos_token, num_threads=tokenizer_threads
+            )
+            for tokens in token_lists:
+                token_buffer.extend(tokens)
+        tokens = token_buffer[:needed_tokens]
+        token_buffer = token_buffer[B * T :]
+
+        use_cuda = device == "cuda"
+        scratch = torch.tensor(tokens, dtype=torch.long, pin_memory=use_cuda)
+        inputs = scratch[:-1].view(B, T).to(device=device, non_blocking=use_cuda)
+        targets = scratch[1:].view(B, T).to(device=device, non_blocking=use_cuda)
+        yield inputs, targets, {"pq_idx": pq_idx, "rg_idx": rg_idx, "epoch": epoch}
+
+
+def tokenizing_distributed_data_loader_bilingual(*args, **kwargs):
+    """Helper that omits state_dict from yields."""
+    for (
+        inputs,
+        targets,
+        state_dict,
+    ) in tokenizing_distributed_data_loader_bilingual_with_state(*args, **kwargs):
+        yield inputs, targets
+
+
+def tokenizing_distributed_data_loader_bilingual_bos_bestfit_with_state(
+    tokenizer,
+    B,
+    T,
+    split,
+    tokenizer_threads=4,
+    tokenizer_batch_size=128,
+    device="cuda",
+    resume_state_dict=None,
+    buffer_size=1000,
+    en_ratio=0.7,
+    seed=42,
+):
+    """
+    Bilingual BOS-aligned dataloader with Best-Fit Cropping.
+
+    Combines the benefits of BOS alignment with bilingual mixing.
+    Every row starts with BOS, documents packed using best-fit algorithm.
+
+    Args:
+        en_ratio: ratio of English samples (0.7 = 70% English, 30% Korean)
+        seed: random seed for reproducible mixing
+    """
+    assert split in ["train", "val"], "split must be 'train' or 'val'"
+
+    row_capacity = T + 1
+    batches = _document_batches_bilingual(
+        split, resume_state_dict, tokenizer_batch_size, en_ratio, seed
+    )
+    bos_token = tokenizer.get_bos_token_id()
+    doc_buffer = []
+    pq_idx, rg_idx, epoch = 0, 0, 1
+
+    def refill_buffer():
+        nonlocal pq_idx, rg_idx, epoch
+        doc_batch, (pq_idx, rg_idx, epoch) = next(batches)
+        token_lists = tokenizer.encode(
+            doc_batch, prepend=bos_token, num_threads=tokenizer_threads
+        )
+        for tokens in token_lists:
+            doc_buffer.append(tokens)
+
+    while True:
+        rows = []
+        for _ in range(B):
+            row = []
+            while len(row) < row_capacity:
+                while len(doc_buffer) < buffer_size:
+                    refill_buffer()
+
+                remaining = row_capacity - len(row)
+
+                # Find largest doc that fits entirely
+                best_idx = -1
+                best_len = 0
+                for i, doc in enumerate(doc_buffer):
+                    doc_len = len(doc)
+                    if doc_len <= remaining and doc_len > best_len:
+                        best_idx = i
+                        best_len = doc_len
+
+                if best_idx >= 0:
+                    doc = doc_buffer.pop(best_idx)
+                    row.extend(doc)
+                else:
+                    # No doc fits - crop shortest in buffer to fill remaining
+                    shortest_idx = min(
+                        range(len(doc_buffer)), key=lambda i: len(doc_buffer[i])
+                    )
+                    doc = doc_buffer.pop(shortest_idx)
+                    row.extend(doc[:remaining])
+
+            rows.append(row[:row_capacity])
+
+        use_cuda = device == "cuda"
+        batch_tensor = torch.tensor(rows, dtype=torch.long, pin_memory=use_cuda)
+        inputs = batch_tensor[:, :-1].to(device=device, non_blocking=use_cuda)
+        targets = batch_tensor[:, 1:].to(device=device, non_blocking=use_cuda)
+
+        yield inputs, targets, {"pq_idx": pq_idx, "rg_idx": rg_idx, "epoch": epoch}
+
+
+def tokenizing_distributed_data_loader_bilingual_bos_bestfit(*args, **kwargs):
+    """Helper that omits state_dict from yields."""
+    for (
+        inputs,
+        targets,
+        state_dict,
+    ) in tokenizing_distributed_data_loader_bilingual_bos_bestfit_with_state(
+        *args, **kwargs
+    ):
         yield inputs, targets
