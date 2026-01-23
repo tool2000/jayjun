@@ -133,6 +133,8 @@ NPROC_PER_NODE=1
 torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_train -- \
     --depth=20 \
     --target-param-data-ratio=20 \
+    --window-pattern=L \
+    --device-batch-size=8 \
     --run=$WANDB_RUN
 
 # Evaluate base model
@@ -147,7 +149,7 @@ echo "Step 5: Midtraining (JayJun identity)"
 echo "=============================================="
 
 # Midtraining will automatically use jayjun_identity_conversations.jsonl if available
-torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.mid_train -- --run=$WANDB_RUN
+torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.mid_train -- --device-batch-size=8 --run=$WANDB_RUN
 torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.chat_eval -- -i mid
 
 # -----------------------------------------------------------------------------
