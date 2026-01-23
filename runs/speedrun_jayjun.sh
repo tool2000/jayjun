@@ -22,9 +22,15 @@
 # ============================================================================
 
 # Default intermediate artifacts directory
+# Use /datadrive for large storage if available, otherwise fallback to ~/.cache
 export OMP_NUM_THREADS=1
-export NANOCHAT_BASE_DIR="$HOME/.cache/nanochat"
+if [ -d "/datadrive" ]; then
+    export NANOCHAT_BASE_DIR="/datadrive/nanochat"
+else
+    export NANOCHAT_BASE_DIR="$HOME/.cache/nanochat"
+fi
 mkdir -p $NANOCHAT_BASE_DIR
+echo "Using NANOCHAT_BASE_DIR: $NANOCHAT_BASE_DIR"
 
 # Set language ratio for bilingual training (70% English, 30% Korean)
 export NANOCHAT_LANG_RATIO=0.7

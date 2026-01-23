@@ -10,10 +10,16 @@
 # 3) Example launch with wandb logging, but see below for setting up wandb first:
 # WANDB_RUN=speedrun screen -L -Logfile speedrun.log -S speedrun bash speedrun.sh
 
-# Default intermediate artifacts directory is in ~/.cache/nanochat
+# Default intermediate artifacts directory
+# Use /datadrive for large storage if available, otherwise fallback to ~/.cache
 export OMP_NUM_THREADS=1
-export NANOCHAT_BASE_DIR="$HOME/.cache/nanochat"
+if [ -d "/datadrive" ]; then
+    export NANOCHAT_BASE_DIR="/datadrive/nanochat"
+else
+    export NANOCHAT_BASE_DIR="$HOME/.cache/nanochat"
+fi
 mkdir -p $NANOCHAT_BASE_DIR
+echo "Using NANOCHAT_BASE_DIR: $NANOCHAT_BASE_DIR"
 
 # -----------------------------------------------------------------------------
 # Python venv setup with uv
