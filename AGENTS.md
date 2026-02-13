@@ -5,7 +5,9 @@
 **Branch:** (not available)
 
 ## OVERVIEW
-nanochat is a full-stack ChatGPT clone designed to train on a single 8XH100 node for ~4 hours ($100 budget). Implements entire LLM pipeline: tokenization → pretraining → midtraining → SFT → RLHF → evaluation → inference → web serving.
+nanochat is a full-stack ChatGPT clone implementing the entire LLM pipeline: tokenization → pretraining → midtraining → SFT → RLHF → evaluation → inference → web serving.
+
+**JayJun variant:** Bilingual (Korean + English) 0.5B model with GQA 2:1, depth=20, trained with ratio=40 (~19.3B tokens) on 1x A100-96GB in ~3 days.
 
 **Stack:** Python 3.10+, PyTorch 2.9+, uv package manager, Flash Attention 3, Muon+AdamW optimizers
 
@@ -23,7 +25,7 @@ nanochat is a full-stack ChatGPT clone designed to train on a single 8XH100 node
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Model architecture | nanochat/gpt.py | GPTConfig, GPT, Block, CausalSelfAttention |
+| Model architecture | nanochat/gpt.py | GPTConfig, GPT, Block, CausalSelfAttention, GQA support via n_kv_head |
 | Inference engine | nanochat/engine.py | KVCache, sampling, calculator tool |
 | Tokenizer | nanochat/tokenizer.py | BPE, SPECIAL_TOKENS (do not change) |
 | Training scripts | scripts/base_train.py, scripts/mid_train.py, scripts/chat_sft.py | Base pretraining, midtraining, SFT |
@@ -98,3 +100,60 @@ python -m scripts.chat_web  # Visit http://IP:8000/
 - **WandB:** Disabled by default (`--run=dummy`), enable with wandb run name
 - **Batch Size Scaling:** LRs scaled by √(batch_size / 2^19) for non-standard batch sizes
 - **Weight Decay Scaling:** Scaled by (12/depth)² for models other than d12
+
+<skills_system priority="1">
+
+## Available Skills
+
+<!-- SKILLS_TABLE_START -->
+<usage>
+When users ask you to perform tasks, check if any of the available skills below can help complete the task more effectively. Skills provide specialized capabilities and domain knowledge.
+
+How to use skills:
+- Invoke: `npx openskills read <skill-name>` (run in your shell)
+  - For multiple: `npx openskills read skill-one,skill-two`
+- The skill content will load with detailed instructions on how to complete the task
+- Base directory provided in output for resolving bundled resources (references/, scripts/, assets/)
+
+Usage notes:
+- Only use skills listed in <available_skills> below
+- Do not invoke a skill that is already loaded in your context
+- Each skill invocation is stateless
+</usage>
+
+<available_skills>
+
+<skill>
+<name>composition-patterns</name>
+<description>React composition patterns that scale. Use when refactoring components with</description>
+<location>project</location>
+</skill>
+
+<skill>
+<name>react-best-practices</name>
+<description>React and Next.js performance optimization guidelines from Vercel Engineering. This skill should be used when writing, reviewing, or refactoring React/Next.js code to ensure optimal performance patterns. Triggers on tasks involving React components, Next.js pages, data fetching, bundle optimization, or performance improvements.</description>
+<location>project</location>
+</skill>
+
+<skill>
+<name>react-native-skills</name>
+<description>React Native and Expo best practices for building performant mobile apps. Use</description>
+<location>project</location>
+</skill>
+
+<skill>
+<name>vercel-deploy-claimable</name>
+<description>Deploy applications and websites to Vercel. Use this skill when the user requests deployment actions such as "Deploy my app", "Deploy this to production", "Create a preview deployment", "Deploy and give me the link", or "Push this live". No authentication required - returns preview URL and claimable deployment link.</description>
+<location>project</location>
+</skill>
+
+<skill>
+<name>web-design-guidelines</name>
+<description>Review UI code for Web Interface Guidelines compliance. Use when asked to "review my UI", "check accessibility", "audit design", "review UX", or "check my site against best practices".</description>
+<location>project</location>
+</skill>
+
+</available_skills>
+<!-- SKILLS_TABLE_END -->
+
+</skills_system>

@@ -38,7 +38,8 @@ from tasks.gsm8k import GSM8K
 from tasks.smoltalk import SmolTalk
 from tasks.customjson import CustomJSON
 from tasks.spellingbee import SimpleSpelling, SpellingBee
-from tasks.korean_chat import KoreanQA, KoreanChat
+from tasks.korean_chat import KoreanQA, KoreanChat, KoreanMMLU, KoreanSmolTalk
+from tasks.cot_math import CoTMath
 
 # -----------------------------------------------------------------------------
 # CLI arguments
@@ -196,6 +197,9 @@ train_tasks = [
     CustomJSON(
         filepath=identity_conversations_filepath
     ),  # 1K rows of identity conversations (nanochat or JayJun)
+    CustomJSON(
+        filepath=identity_conversations_filepath
+    ),  # 2nd epoch of identity for reinforcement
     SimpleSpelling(
         size=300, split="train"
     ),  # 300 rows of Simple Spelling (e.g. spell the word 'apple')
@@ -206,12 +210,30 @@ train_tasks = [
 
 # Add Korean data if available (for bilingual JayJun training)
 try:
-    korean_qa = KoreanQA(split="train", stop=5000)  # Up to 5K Korean QA pairs for SFT
+    korean_qa = KoreanQA(split="train", stop=10000)  # 10K Korean QA pairs (doubled)
     if korean_qa.num_examples() > 0:
         train_tasks.append(korean_qa)
         print0(f"Added {korean_qa.num_examples()} Korean QA examples to SFT")
 except Exception as e:
     print0(f"Korean QA dataset not available (optional): {e}")
+
+# Korean conversations for SFT
+try:
+    korean_smoltalk = KoreanSmolTalk(split="train", stop=5000)
+    if korean_smoltalk.num_examples() > 0:
+        train_tasks.append(korean_smoltalk)
+        print0(f"Added {korean_smoltalk.num_examples()} Korean SmolTalk examples to SFT")
+except Exception as e:
+    print0(f"Korean SmolTalk not available (optional): {e}")
+
+# CoT math for reasoning (small high-quality subset)
+try:
+    cot_math = CoTMath(split="train", stop=5000)  # 5K CoT math problems
+    if cot_math.num_examples() > 0:
+        train_tasks.append(cot_math)
+        print0(f"Added {cot_math.num_examples()} CoT math examples to SFT")
+except Exception as e:
+    print0(f"CoT math dataset not available (optional): {e}")
 
 train_ds = TaskMixture(train_tasks)
 # 2.3K + 1.1K + 8K + 10K + 1K + 0.3K + 0.3K + 5K(optional) = ~28K rows

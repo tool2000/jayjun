@@ -5,7 +5,7 @@
 **Branch:** (not available)
 
 ## OVERVIEW
-Eight evaluation tasks for model benchmarking (ARC, GSM8K, MMLU, HumanEval, SmolTalk, SpellingBee, CustomJSON).
+Ten evaluation/training tasks for model benchmarking and data (ARC, GSM8K, MMLU, HumanEval, SmolTalk, SpellingBee, CustomJSON, KoreanChat, CoTMath).
 
 ## STRUCTURE
 ```
@@ -17,7 +17,9 @@ tasks/
 ├── humaneval.py        # Python coding benchmark (generative)
 ├── smoltalk.py         # HuggingFace conversations
 ├── spellingbee.py      # Letter counting task
-└── customjson.py       # Load from arbitrary JSONL files
+├── customjson.py       # Load from arbitrary JSONL files
+├── korean_chat.py      # KoreanQA, KoreanChat, KoreanSmolTalk, KoreanMMLU
+└── cot_math.py         # Chain-of-Thought math (OpenMathInstruct-2 / GSM8K fallback)
 ```
 
 ## WHERE TO LOOK
@@ -31,6 +33,10 @@ tasks/
 | MMLU subjects | tasks/mmlu.py | 57 subjects, letters=(A,B,C,D) |
 | HumanEval extraction | tasks/humaneval.py | extract_program() handles markdown blocks |
 | RL rewards | tasks/gsm8k.py/reward() | Optional, returns float |
+| Korean QA | tasks/korean_chat.py/KoreanQA | maywell/ko_wikidata_QA, conversation format |
+| Korean conversations | tasks/korean_chat.py/KoreanSmolTalk | heegyu/korquad-chat-v1, nlpai-lab/kullm-v2 |
+| Korean MMLU | tasks/korean_chat.py/KoreanMMLU | HAERAE-HUB/KMMLU, multiple choice in Korean |
+| CoT math | tasks/cot_math.py/CoTMath | nvidia/OpenMathInstruct-2, step-by-step reasoning |
 
 ## CONVENTIONS
 - **Slicing**: All tasks support start/stop/step via Task.__init__

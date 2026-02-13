@@ -37,7 +37,8 @@ from tasks.mmlu import MMLU
 from tasks.smoltalk import SmolTalk
 from tasks.customjson import CustomJSON
 from tasks.spellingbee import SimpleSpelling, SpellingBee
-from tasks.korean_chat import KoreanQA, KoreanChat
+from tasks.korean_chat import KoreanQA, KoreanChat, KoreanMMLU, KoreanSmolTalk
+from tasks.cot_math import CoTMath
 
 # -----------------------------------------------------------------------------
 # CLI arguments
@@ -236,12 +237,39 @@ train_tasks = [
 
 # Add Korean data if available (for bilingual JayJun training)
 try:
-    korean_qa = KoreanQA(split="train", stop=50000)  # Up to 50K Korean QA pairs
+    korean_qa = KoreanQA(split="train", stop=100000)  # Up to 100K Korean QA pairs (doubled)
     if korean_qa.num_examples() > 0:
         train_tasks.append(korean_qa)
         print0(f"Added {korean_qa.num_examples()} Korean QA examples to midtraining")
 except Exception as e:
     print0(f"Korean QA dataset not available (optional): {e}")
+
+# Korean conversations
+try:
+    korean_smoltalk = KoreanSmolTalk(split="train")
+    if korean_smoltalk.num_examples() > 0:
+        train_tasks.append(korean_smoltalk)
+        print0(f"Added {korean_smoltalk.num_examples()} Korean SmolTalk examples to midtraining")
+except Exception as e:
+    print0(f"Korean SmolTalk not available (optional): {e}")
+
+# CoT math for reasoning
+try:
+    cot_math = CoTMath(split="train", stop=30000)  # 30K CoT math problems
+    if cot_math.num_examples() > 0:
+        train_tasks.append(cot_math)
+        print0(f"Added {cot_math.num_examples()} CoT math examples to midtraining")
+except Exception as e:
+    print0(f"CoT math dataset not available (optional): {e}")
+
+# Korean reasoning (KMMLU)
+try:
+    korean_mmlu = KoreanMMLU(split="train", stop=20000)  # 20K Korean MMLU
+    if korean_mmlu.num_examples() > 0:
+        train_tasks.append(korean_mmlu)
+        print0(f"Added {korean_mmlu.num_examples()} Korean MMLU examples to midtraining")
+except Exception as e:
+    print0(f"Korean MMLU not available (optional): {e}")
 
 train_dataset = TaskMixture(train_tasks)
 # total: 460K + 100K + 8K + 2K + 200K + 80K + 50K(optional) = ~900K rows

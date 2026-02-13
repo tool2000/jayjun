@@ -3,15 +3,16 @@
 # ============================================================================
 # speedrun_jayjun.sh - Bilingual ChatGPT Clone "JayJun" (제이준)
 # ============================================================================
-# 
+#
 # This script trains a bilingual (Korean + English) ChatGPT clone named "JayJun"
 # Based on the original speedrun.sh but with:
 # - 70% English + 30% Korean pretraining data
 # - JayJun identity (제이준, created by "준이 아빠")
 # - Bilingual tokenizer trained on mixed data
+# - GQA 2:1 for efficient 0.5B model with 20 layers
 #
-# Target: ~$100 tier (~4 hours on 8XH100)
-# Model: d20 (561M parameters)
+# Target: ~2.5-3.5 days on 1x A100-96GB
+# Model: d20 GQA 2:1 (482M parameters), ratio=40 (~19.3B tokens)
 #
 # Usage:
 #   bash runs/speedrun_jayjun.sh
@@ -63,19 +64,19 @@ echo "=============================================="
 echo "Step 1: Downloading datasets"
 echo "=============================================="
 
-# Download English dataset (same as speedrun.sh)
-# For d20: 561M params * 20 = 11.2B tokens
-# At 4.8 chars/token = 54B chars
-# At 250M chars/shard = 216 shards (round up to 240)
-# With 35% waste = 370 shards
+# Download English dataset
+# For d20 GQA: 482M params * 40 = 19.3B tokens
+# At 4.8 chars/token = 93B chars
+# At 250M chars/shard = 372 shards (round up to 400)
+# With 35% waste = 615 shards
 python -m nanochat.dataset -n 8  # First 8 shards for tokenizer training
 
 # Start downloading more English shards in background
-python -m nanochat.dataset -n 370 &
+python -m nanochat.dataset -n 615 &
 ENGLISH_DOWNLOAD_PID=$!
 
 # Download Korean dataset (for 30% of training)
-# Need ~30% of English data = ~111 shards worth
+# Need ~30% of English data = ~185 shards worth
 # Korean dataset from HuggingFace (eliceai/korean-fineweb-edu-demo)
 echo "Downloading Korean dataset..."
 python -m nanochat.dataset --korean &
@@ -122,19 +123,24 @@ wait $ENGLISH_DOWNLOAD_PID 2>/dev/null || true
 # Base model pretraining
 
 echo "=============================================="
-echo "Step 4: Pretraining d20 model (bilingual)"
+echo "Step 4: Pretraining d20 GQA model (bilingual, 0.5B)"
 echo "=============================================="
 
 # Number of GPUs
 NPROC_PER_NODE=1
 
-# Pretrain the d20 model
+# Pretrain the d20 GQA model (~482M params)
+# GQA 2:1: 6 query heads, 3 KV heads
+# ratio=40: ~19.3B tokens for thorough training
+# device-batch-size=64: fills A100-96GB efficiently
 # Note: The dataloader will use NANOCHAT_LANG_RATIO for 70:30 mixing
 torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_train -- \
     --depth=20 \
-    --target-param-data-ratio=20 \
+    --aspect-ratio=38 \
+    --n-kv-heads=3 \
+    --target-param-data-ratio=40 \
     --window-pattern=L \
-    --device-batch-size=8 \
+    --device-batch-size=64 \
     --run=$WANDB_RUN
 
 # Evaluate base model
@@ -145,11 +151,13 @@ torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_eval
 # Midtraining (teach JayJun identity, conversation format, tool use)
 
 echo "=============================================="
-echo "Step 5: Midtraining (JayJun identity)"
+echo "Step 5: Midtraining (JayJun identity + Korean + CoT)"
 echo "=============================================="
 
-# Midtraining will automatically use jayjun_identity_conversations.jsonl if available
-torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.mid_train -- --device-batch-size=8 --run=$WANDB_RUN
+# Midtraining with larger batch size for 0.5B model
+# Includes: SmolTalk, MMLU, GSM8K, Identity, Spelling, KoreanQA(100K),
+#           KoreanSmolTalk, CoTMath(30K), KoreanMMLU(20K)
+torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.mid_train -- --device-batch-size=32 --run=$WANDB_RUN
 torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.chat_eval -- -i mid
 
 # -----------------------------------------------------------------------------
@@ -159,8 +167,10 @@ echo "=============================================="
 echo "Step 6: Supervised Fine-Tuning (SFT)"
 echo "=============================================="
 
-# SFT will automatically include Korean data if available
-torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.chat_sft -- --run=$WANDB_RUN
+# SFT with larger batch size for 0.5B model
+# Includes: ARC, GSM8K, SmolTalk, Identity(2x), Spelling, KoreanQA(10K),
+#           KoreanSmolTalk(5K), CoTMath(5K)
+torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.chat_sft -- --device-batch-size=16 --run=$WANDB_RUN
 torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.chat_eval -- -i sft
 
 # -----------------------------------------------------------------------------

@@ -71,6 +71,10 @@ parser.add_argument(
 parser.add_argument(
     "--head-dim", type=int, default=128, help="target head dimension for attention"
 )
+parser.add_argument(
+    "--n-kv-heads", type=int, default=-1,
+    help="number of KV heads for GQA (-1 = same as n_head, i.e. no GQA)"
+)
 parser.add_argument("--max-seq-len", type=int, default=2048, help="max context length")
 parser.add_argument(
     "--window-pattern",
@@ -290,9 +294,12 @@ num_layers = args.depth
 base_dim = args.depth * args.aspect_ratio
 model_dim = ((base_dim + args.head_dim - 1) // args.head_dim) * args.head_dim
 num_heads = model_dim // args.head_dim
-num_kv_heads = (
-    num_heads  # default is 1:1 GQA (Group Query Attention) ratio (i.e. GQA is disabled)
-)
+if args.n_kv_heads > 0:
+    num_kv_heads = args.n_kv_heads
+    assert num_heads % num_kv_heads == 0, f"n_head ({num_heads}) must be divisible by n_kv_heads ({num_kv_heads})"
+    print0(f"GQA enabled: {num_heads} query heads, {num_kv_heads} KV heads (ratio {num_heads // num_kv_heads}:1)")
+else:
+    num_kv_heads = num_heads  # default: no GQA
 head_dim = model_dim // num_heads
 print0(f"num_layers: {num_layers}")
 print0(f"model_dim: {model_dim} (base: {base_dim}, nudge: {model_dim - base_dim:+d})")
