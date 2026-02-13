@@ -46,6 +46,34 @@
 - CUDA GPU (A100 96GB 권장)
 - [uv](https://github.com/astral-sh/uv) 패키지 매니저
 
+### 디스크 공간 요구사항
+
+학습 전에 충분한 디스크 공간을 반드시 확보하세요. 공간 부족 시 학습이 중단됩니다.
+
+| 항목 | 저장 경로 | 예상 용량 |
+|------|-----------|-----------|
+| 영어 사전학습 데이터 (615 shards) | `$NANOCHAT_BASE_DIR/base_data/` | ~61.5GB |
+| 한국어 사전학습 데이터 | `$NANOCHAT_BASE_DIR/base_data_ko/` | ~18.5GB |
+| HuggingFace 캐시 (mid/SFT 데이터셋) | `~/.cache/huggingface/` | ~8-15GB |
+| 체크포인트 (base + mid + sft) | `*_checkpoints/` | ~7GB |
+| Python 가상환경 | `.venv/` | ~3-5GB |
+| 토크나이저 + 정체성 데이터 | `$NANOCHAT_BASE_DIR/` | ~0.1GB |
+| **합계** | | **~100-110GB** |
+
+> **권장: 최소 120GB, 안전하게 150GB 이상 확보**
+>
+> `NANOCHAT_BASE_DIR`은 기본적으로 `/datadrive/nanochat`을 사용합니다.
+> 홈 디렉토리 공간이 부족할 경우, HuggingFace 캐시 경로를 변경할 수 있습니다:
+> ```bash
+> export HF_HOME=/datadrive/hf_cache
+> ```
+
+사전 확인:
+```bash
+df -h /datadrive   # 데이터 드라이브 여유 공간 확인
+df -h ~            # 홈 디렉토리 여유 공간 확인
+```
+
 ### 학습 실행
 
 A100 GPU가 있는 서버에서 다음 스크립트를 실행하면 전체 파이프라인이 자동으로 진행됩니다:
