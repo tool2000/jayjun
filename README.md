@@ -1,217 +1,272 @@
-# nanochat
+# nanochat-ko
 
-![nanochat logo](dev/nanochat.png)
-
-> The best ChatGPT that $100 can buy.
-
-This repo is a full-stack implementation of an LLM like ChatGPT in a single, clean, minimal, hackable, dependency-lite codebase. nanochat is designed to run on a single 8XH100 node via scripts like [speedrun.sh](runs/speedrun.sh), that run the entire pipeline start to end. This includes tokenization, pretraining, finetuning, evaluation, inference, and web serving over a simple UI so that you can talk to your own LLM just like ChatGPT. nanochat will become the capstone project of the course LLM101n being developed by Eureka Labs.
-
-## Updates
-
-- (Jan 16 2026) The repo is in active development, I am currently fleshing out the pretraining stage.
-- (Jan 7 2026) See new post: [nanochat Miniseries v1](https://github.com/karpathy/nanochat/discussions/420) and the associated script [miniseries.sh](runs/miniseries.sh).
-
-## Talk to it
-
-To get a sense of the endpoint of this repo, you can currently find [nanochat d34](https://github.com/karpathy/nanochat/discussions/314) hosted on [nanochat.karpathy.ai](https://nanochat.karpathy.ai/). "d34" means that this model has 34 layers in the Transformer neural network. This model has 2.2 billion parameters, it was trained on 88 billion tokens by simply running the training script [run1000.sh](runs/run1000.sh) with `--target_param_data_ratio=40` (2x longer than Chinchilla-optimal), and the total cost of training was ~$2,500 (about 100 hours training time on 8XH100 GPU node). While today this is enough to outperform GPT-2 of 2019, it falls dramatically short of modern Large Language Models like GPT-5. When talking to these micro models, you'll see that they make a lot of mistakes, they are a little bit naive and silly and they hallucinate a ton, a bit like children. It's kind of amusing. But what makes nanochat unique is that it is fully yours - fully configurable, tweakable, hackable, and trained by you from start to end. To train and talk to your own, we turn to...
-
-## Quick start
-
-The fastest way to feel the magic is to run the speedrun script [speedrun.sh](runs/speedrun.sh), which trains and inferences the $100 tier of nanochat. On an 8XH100 node at $24/hr, this gives a total run time of about 4 hours. Boot up a new 8XH100 GPU box from your favorite provider (e.g. I use and like [Lambda](https://lambda.ai/service/gpu-cloud)), and kick off the training script:
-
-```bash
-bash runs/speedrun.sh
+```
+                                  _           _        _
+  _ __   __ _ _ __   ___   ___| |__   __ _| |_     | | _____
+ | '_ \ / _` | '_ \ / _ \ / __| '_ \ / _` | __|____| |/ / _ \
+ | | | | (_| | | | | (_) | (__| | | | (_| | ||_____|   < (_) |
+ |_| |_|\__,_|_| |_|\___/ \___|_| |_|\__,_|\__|    |_|\_\___/
 ```
 
-Alternatively, since the script runs for 4 hours, I like to launch it like this inside a new screen session `speedrun` (and also log output to `speedrun.log`):
+> JayJun (제이준) - 준이 아빠가 만든 한국어+영어 이중언어 ChatGPT
+
+이 프로젝트는 Andrej Karpathy의 [nanochat](https://github.com/karpathy/nanochat)을 기반으로 한 **이중언어(한국어+영어) ChatGPT 클론**입니다. A100 GPU 1장으로 약 3일 만에 처음부터 끝까지 학습할 수 있는, 완전한 LLM 파이프라인을 제공합니다.
+
+## 모델 개요
+
+| 항목 | 값 |
+|------|---|
+| 모델명 | JayJun (제이준) |
+| 파라미터 수 | **~482M (0.5B)** |
+| 아키텍처 | Transformer, depth=20, GQA 2:1 |
+| model_dim | 768 (aspect_ratio=38) |
+| 어텐션 헤드 | 6 query / 3 KV (Grouped-Query Attention) |
+| head_dim | 128 |
+| vocab_size | 65,536 (이중언어 BPE 토크나이저) |
+| 컨텍스트 길이 | 2,048 토큰 |
+| 학습 토큰 수 | ~19.3B (ratio=40) |
+| 학습 언어 비율 | 영어 70% + 한국어 30% |
+| 학습 환경 | A100 96GB x 1 |
+| 예상 학습 시간 | ~2.5-3.5일 |
+
+## 특징
+
+- **이중언어 지원**: 한국어와 영어를 모두 이해하고 생성
+- **GQA (Grouped-Query Attention)**: 20개 레이어를 유지하면서 0.5B로 경량화, 추론 속도 향상
+- **풀스택 파이프라인**: 토크나이저 학습 → 사전학습 → 중간학습 → SFT → 평가 → 추론 → 웹 서빙
+- **한국어 추론 강화**: mid/SFT 단계에 한국어 QA, KMMLU, CoT 수학 데이터 포함
+- **JayJun 정체성**: "준이 아빠가 만든" 친근하고 겸손한 AI 어시스턴트
+
+## 빠른 시작
+
+### 요구사항
+
+- Python 3.10+
+- PyTorch 2.9+
+- CUDA GPU (A100 96GB 권장)
+- [uv](https://github.com/astral-sh/uv) 패키지 매니저
+
+### 학습 실행
+
+A100 GPU가 있는 서버에서 다음 스크립트를 실행하면 전체 파이프라인이 자동으로 진행됩니다:
 
 ```bash
-screen -L -Logfile speedrun.log -S speedrun bash runs/speedrun.sh
+bash runs/speedrun_jayjun.sh
 ```
 
-See the [screen cheatsheet](https://gist.github.com/jctosta/af918e1618682638aa82) if you are less familiar. You can watch it go inside the screen session, or detach with `Ctrl-a d` and `tail speedrun.log` to view progress. Now wait 4 hours. Once it's done, you can talk to your LLM via the ChatGPT-like web UI. Make sure again that your local uv virtual environment is active (run `source .venv/bin/activate`), and serve it:
+장시간 학습이므로 screen 세션에서 실행하는 것을 권장합니다:
 
 ```bash
+screen -L -Logfile jayjun.log -S jayjun bash runs/speedrun_jayjun.sh
+```
+
+학습이 완료되면 (약 2.5~3.5일) 웹 UI로 대화할 수 있습니다:
+
+```bash
+source .venv/bin/activate
 python -m scripts.chat_web
 ```
 
-And then visit the URL shown. Make sure to access it correctly, e.g. on Lambda use the public IP of the node you're on, followed by the port, so for example [http://209.20.xxx.xxx:8000/](http://209.20.xxx.xxx:8000/), etc. Then talk to your LLM as you'd normally talk to ChatGPT! Get it to write stories or poems. Ask it to tell you who you are to see a hallucination. Ask it why the sky is blue. Or why it's green. The speedrun is a 4e19 FLOPs capability model so it's a bit like talking to a kindergartener :).
-
----
-
-<img width="2672" height="1520" alt="image" src="https://github.com/user-attachments/assets/ed39ddf8-2370-437a-bedc-0f39781e76b5" />
-
----
-
-You can also `cat report.md` file which appeared in the project directory and contains the "report card" of the run, i.e. a bunch of evaluations and metrics. At the very end, you'll see a summary table, for example:
-
----
-
-- Characters: 333,989
-- Lines: 8,304
-- Files: 44
-- Tokens (approx): 83,497
-- Dependencies (uv.lock lines): 2,004
-
-| Metric          | BASE     | MID      | SFT      | RL       |
-|-----------------|----------|----------|----------|----------|
-| CORE            | 0.2219   | -        | -        | -        |
-| ARC-Challenge   | -        | 0.2875   | 0.2807   | -        |
-| ARC-Easy        | -        | 0.3561   | 0.3876   | -        |
-| GSM8K           | -        | 0.0250   | 0.0455   | 0.0758   |
-| HumanEval       | -        | 0.0671   | 0.0854   | -        |
-| MMLU            | -        | 0.3111   | 0.3151   | -        |
-| ChatCORE        | -        | 0.0730   | 0.0884   | -        |
-
-Total wall clock time: 3h51m
-
----
-
-(Your table might be missing the RL number by default). For a lot more information around the speedrun script and what to look for and expect, please refer to the walkthrough that I posted in Discussions of the repo: ["Introducing nanochat: The best ChatGPT that $100 can buy"](https://github.com/karpathy/nanochat/discussions/1).
-
-## Bigger models
-
-Unsurprisingly, $100 is not enough to train a highly performant ChatGPT clone. In fact, LLMs are famous for their multi-million dollar capex. For our purposes, I think there are two more scales of interest. First is the ~$300 tier d26 model (i.e. depth=26) that trains in ~12 hours, which slightly outperforms GPT-2 CORE score. Second is the $1000 tier (~41.6 hours), just because it's a nice round number. But both of these are not yet fully supported and therefore not attached here in the master branch yet.
-
-That said, to give a sense, the example changes needed for the [speedrun.sh](runs/speedrun.sh) file to train a GPT-2 grade model d26 only involve three changes:
+CLI로도 대화 가능합니다:
 
 ```bash
-...
-# you'll need to download more data shards for pretraining
-# get the number of parameters, multiply 20 to get tokens, multiply by 4.8 to get chars,
-# divide by 250 million to get number of shards. todo need to improve this...
-python -m nanochat.dataset -n 450 &
-...
-# use --depth to increase model size. to not oom, halve device batch size 32 -> 16:
-torchrun --standalone --nproc_per_node=8 -m scripts.base_train -- --depth=26 --device-batch-size=16
-...
-# make sure to use the same later during midtraining:
-torchrun --standalone --nproc_per_node=8 -m scripts.mid_train -- --device-batch-size=16
+python -m scripts.chat_cli -p '안녕하세요! 당신은 누구예요?'
 ```
 
-That's it! The biggest thing to pay attention to is making sure you have enough data shards to train on (the code will loop and do more epochs over the same training set otherwise, decreasing learning speed a bit), and managing your memory/VRAM, primarily by decreasing the `device_batch_size` until things fit (the scripts automatically compensate by increasing the number of gradient accumulation loops, simply turning parallel compute to sequential compute).
+## 학습 파이프라인
 
-And a bit more about computing environments that will run nanochat:
+`speedrun_jayjun.sh`는 다음 7단계를 순차적으로 실행합니다:
 
-- The code will run just fine on the Ampere 8XA100 GPU node as well, but a bit slower.
-- All code will run just fine on even a single GPU by omitting `torchrun`, and will produce ~identical results (code will automatically switch to gradient accumulation), but you'll have to wait 8 times longer.
-- If your GPU(s) have less than 80GB, you'll have to tune some of the hyperparameters or you will OOM / run out of VRAM. Look for `--device_batch_size` in the scripts and reduce it until things fit. E.g. from 32 (default) to 16, 8, 4, 2, or even 1. Less than that you'll have to know a bit more what you're doing and get more creative.
-- Most of the code is fairly vanilla PyTorch so it should run on anything that supports that - xpu, mps, or etc, but I haven't implemented this out of the box so it might take a bit of tinkering.
+| 단계 | 스크립트 | 설명 |
+|------|----------|------|
+| 1 | `nanochat.dataset` | 영어(FineWeb-Edu) + 한국어(korean-fineweb-edu) 데이터 다운로드 |
+| 2 | `scripts.tok_train` | 이중언어 BPE 토크나이저 학습 (vocab=65536, 영:한=70:30) |
+| 3 | `dev.gen_jayjun_identity` | JayJun 정체성 대화 데이터 생성 (1000개 템플릿) |
+| 4 | `scripts.base_train` | **사전학습** — d20 GQA 모델, ~19.3B 토큰, batch-size=64 |
+| 5 | `scripts.mid_train` | **중간학습** — 대화 형식, 정체성, 한국어 QA, CoT 수학 |
+| 6 | `scripts.chat_sft` | **SFT** — 지도 미세조정, 한국어 강화, 추론 데이터 |
+| 7 | `nanochat.report` | 평가 리포트 생성 |
 
-## Running on CPU / MPS
+### 학습 데이터 구성
 
-nanochat can be run on CPU or on MPS (if you're on Macbook) in principle, and will automatically try to detect what device is best to run on. The script [runcpu.sh](runs/runcpu.sh) shows a very simple example that will exercise the code paths but basically produce garbage results. Unless you know what you're doing, I basically don't recommend using this script right now and hope to tune it a bit more in the future.
+**사전학습 (Pretraining):**
+- FineWeb-Edu (영어 70%) + korean-fineweb-edu (한국어 30%)
+- 총 ~19.3B 토큰, ratio=40
 
-## Customization
+**중간학습 (Mid-training) ~1.1M 대화:**
 
-To customize your nanochat, see [Guide: infusing identity to your nanochat](https://github.com/karpathy/nanochat/discussions/139) in Discussions, which describes how you can tune your nanochat's personality through synthetic data generation and mixing that data into midtraining and SFT stages.
+| 데이터셋 | 수량 | 목적 |
+|----------|-----|------|
+| SmolTalk | 460K | 일반 영어 대화 |
+| MMLU auxiliary | 100K | 객관식 지식 |
+| KoreanQA | 100K | 한국어 QA |
+| KoreanSmolTalk | ~50K | 한국어 대화 |
+| CoT Math | 30K | 단계별 수학 추론 |
+| KMMLU | 20K | 한국어 추론/지식 |
+| GSM8K | 8K | 수학 + 도구 사용 |
+| SimpleSpelling | 200K | 철자 |
+| SpellingBee | 80K | 글자 세기 |
+| JayJun Identity | 1K x 2 | 정체성 |
 
-Additionally, to add new abilities to nanochat, see [Guide: counting r in strawberry (and how to add abilities generally)](https://github.com/karpathy/nanochat/discussions/164).
+**SFT (Supervised Fine-Tuning) ~45K 대화:**
 
-## Questions
+| 데이터셋 | 수량 | 목적 |
+|----------|-----|------|
+| SmolTalk | 10K | 일반 대화 |
+| KoreanQA | 10K | 한국어 QA |
+| GSM8K | 8K | 수학 |
+| KoreanSmolTalk | 5K | 한국어 대화 |
+| CoT Math | 5K | 추론 |
+| ARC-Easy/Challenge | 3.4K | 과학 |
+| JayJun Identity | 1K x 2 | 정체성 강화 |
+| Spelling | 600 | 철자/글자 세기 |
 
-I recommend using [DeepWiki](https://deepwiki.com/karpathy/nanochat) from Devin/Cognition to ask questions of this repo. In the URL of this repo, simply change github.com to deepwiki.com, and you're off.
+## 모델 아키텍처
 
-You can also come to the [#nanochat Discord channel](https://discord.com/channels/1020383067459821711/1427295580895314031) to ask questions, or use the Discussions.
-
-## Tests
-
-I haven't invested too much here but some tests exist, especially for the tokenizer. Run e.g. as:
-
-```bash
-python -m pytest tests/test_engine.py -v -s
+```
+입력 토큰 → [토큰 임베딩 (65536 x 768)]
+              ↓
+         [RMS Norm]
+              ↓
+     ┌── x20 Transformer Block ──┐
+     │  ┌─ Attention (GQA 2:1) ─┐│
+     │  │  Q: 6 heads x 128 dim ││
+     │  │  K: 3 heads x 128 dim ││  ← 2개의 Q 헤드가 1개의 KV 공유
+     │  │  V: 3 heads x 128 dim ││
+     │  │  + Value Embedding     ││  ← 교대 레이어에 적용
+     │  │  + Rotary Embedding    ││
+     │  └────────────────────────┘│
+     │  ┌─ MLP ─────────────────┐│
+     │  │  768 → 3072 → ReLU² → ││
+     │  │  3072 → 768           ││
+     │  └────────────────────────┘│
+     └────────────────────────────┘
+              ↓
+         [RMS Norm]
+              ↓
+     [LM Head (768 → 65536)]
+              ↓
+         출력 로짓
 ```
 
-## File structure
+**핵심 기술:**
+- **GQA 2:1**: Query 6개, KV 3개 — 파라미터 절감 + 추론 속도 향상
+- **Muon + AdamW**: 선형 레이어는 Muon, 임베딩은 AdamW 혼합 최적화
+- **Value Embedding**: ResFormer 스타일, 교대 레이어에서 입력 의존적 게이트 적용
+- **Sliding Window**: `--window-pattern=L` (전체 컨텍스트)
+
+## GPU 최적화
+
+A100 96GB에서 기존 1.4B 모델 대비 최적화된 설정:
+
+| 설정 | 기존 (1.4B) | 현재 (0.5B) | 효과 |
+|------|------------|------------|------|
+| device-batch-size (사전학습) | 8 | **64** | VRAM 활용 ~48GB → ~70-80GB |
+| grad_accum_steps | 32 | **4** | GPU 유휴 시간 대폭 감소 |
+| device-batch-size (중간학습) | 8 | **32** | |
+| device-batch-size (SFT) | 4 | **16** | |
+| 총 학습 시간 | ~6.5일 | **~2.5-3.5일** | |
+
+## 평가 벤치마크
+
+학습 완료 후 자동으로 다음 벤치마크가 실행됩니다:
+
+- **CORE** — DCLM 논문 기반 종합 메트릭
+- **ARC-Easy / ARC-Challenge** — 과학 객관식
+- **GSM8K** — 초등 수학
+- **HumanEval** — Python 코딩
+- **MMLU** — 종합 지식
+- **ChatCORE** — 대화형 평가
+
+결과는 `report.md` 파일에 저장됩니다.
+
+## 프로젝트 구조
 
 ```
 .
-├── LICENSE
-├── README.md
-├── dev
-│   ├── gen_synthetic_data.py       # Example synthetic data for identity
-│   ├── generate_logo.html
-│   ├── nanochat.png
-│   └── repackage_data_reference.py # Pretraining data shard generation
-├── nanochat
-│   ├── __init__.py                 # empty
-│   ├── adamw.py                    # Distributed AdamW optimizer
-│   ├── checkpoint_manager.py       # Save/Load model checkpoints
-│   ├── common.py                   # Misc small utilities, quality of life
-│   ├── core_eval.py                # Evaluates base model CORE score (DCLM paper)
-│   ├── dataloader.py               # Tokenizing Distributed Data Loader
-│   ├── dataset.py                  # Download/read utils for pretraining data
-│   ├── engine.py                   # Efficient model inference with KV Cache
-│   ├── execution.py                # Allows the LLM to execute Python code as tool
-│   ├── gpt.py                      # The GPT nn.Module Transformer
-│   ├── logo.svg
-│   ├── loss_eval.py                # Evaluate bits per byte (instead of loss)
-│   ├── muon.py                     # Distributed Muon optimizer
-│   ├── report.py                   # Utilities for writing the nanochat Report
-│   ├── tokenizer.py                # BPE Tokenizer wrapper in style of GPT-4
-│   └── ui.html                     # HTML/CSS/JS for nanochat frontend
-├── pyproject.toml
-├── runs
-│   ├── miniseries.sh               # Miniseries training script
-│   ├── run1000.sh                  # Train the ~$800 nanochat d32
-│   ├── runcpu.sh                   # Small example of how to run on CPU/MPS
-│   ├── scaling_laws.sh             # Scaling laws experiments
-│   └── speedrun.sh                 # Train the ~$100 nanochat d20
-├── scripts
-│   ├── base_eval.py                # Base model: calculate CORE score
-│   ├── base_loss.py                # Base model: calculate bits per byte, sample
-│   ├── base_train.py               # Base model: train
-│   ├── chat_cli.py                 # Chat model (SFT/Mid): talk to over CLI
-│   ├── chat_eval.py                # Chat model (SFT/Mid): eval tasks
-│   ├── chat_rl.py                  # Chat model (SFT/Mid): reinforcement learning
-│   ├── chat_sft.py                 # Chat model: train SFT
-│   ├── chat_web.py                 # Chat model (SFT/Mid): talk to over WebUI
-│   ├── mid_train.py                # Chat model: midtraining
-│   ├── tok_eval.py                 # Tokenizer: evaluate compression rate
-│   └── tok_train.py                # Tokenizer: train it
-├── tasks
-│   ├── arc.py                      # Multiple choice science questions
-│   ├── common.py                   # TaskMixture | TaskSequence
-│   ├── customjson.py               # Make Task from arbitrary jsonl convos
-│   ├── gsm8k.py                    # 8K Grade School Math questions
-│   ├── humaneval.py                # Misnomer; Simple Python coding task
-│   ├── mmlu.py                     # Multiple choice questions, broad topics
-│   ├── smoltalk.py                 # Conglomerate dataset of SmolTalk from HF
-│   └── spellingbee.py              # Task teaching model to spell/count letters
-├── tests
-│   └── test_engine.py
-└── uv.lock
+├── nanochat/                    # 핵심 라이브러리
+│   ├── gpt.py                   # GPT 모델 (GQA 지원)
+│   ├── tokenizer.py             # BPE 토크나이저
+│   ├── engine.py                # 추론 엔진 (KV Cache)
+│   ├── dataloader.py            # 분산 데이터 로더 (이중언어)
+│   ├── dataset.py               # 데이터 다운로드/읽기
+│   ├── muon.py                  # Muon 옵티마이저
+│   ├── adamw.py                 # AdamW 옵티마이저
+│   └── ...                      # checkpoint, eval, report 등
+│
+├── scripts/                     # 학습/평가/서빙 스크립트
+│   ├── base_train.py            # 사전학습 (--n-kv-heads로 GQA 설정)
+│   ├── mid_train.py             # 중간학습 (한국어+CoT 데이터 포함)
+│   ├── chat_sft.py              # SFT (한국어+추론 강화)
+│   ├── chat_web.py              # 웹 UI 서버
+│   ├── chat_cli.py              # CLI 대화
+│   └── ...                      # eval, tokenizer, RL 등
+│
+├── tasks/                       # 평가/학습 데이터셋
+│   ├── korean_chat.py           # KoreanQA, KoreanSmolTalk, KoreanMMLU
+│   ├── cot_math.py              # CoT 수학 (OpenMathInstruct-2)
+│   ├── gsm8k.py, arc.py, ...   # 기존 벤치마크
+│   └── common.py                # Task 베이스 클래스
+│
+├── runs/                        # 학습 레시피
+│   ├── speedrun_jayjun.sh       # JayJun 이중언어 학습 (이 파일!)
+│   ├── speedrun.sh              # 원본 nanochat 영어 학습
+│   └── ...
+│
+├── dev/                         # 개발 도구
+│   ├── gen_jayjun_identity.py   # JayJun 정체성 데이터 생성
+│   └── ...
+│
+├── tests/                       # 테스트
+│   ├── test_engine.py           # 추론 엔진 테스트
+│   ├── test_cot_math.py         # CoT 수학 데이터셋 테스트
+│   └── test_korean_chat.py      # 한국어 데이터셋 테스트
+│
+└── docs/plans/                  # 설계 문서
+    ├── 2026-02-13-jayjun-0.5b-optimization-design.md
+    └── 2026-02-13-jayjun-0.5b-implementation.md
 ```
 
-## Contributing
+## CPU / MPS 실행
 
-nanochat is nowhere near finished. The goal is to improve the state of the art in micro models that are accessible to work with end to end on budgets of < $1000 dollars. Accessibility is about overall cost but also about cognitive complexity - nanochat is not an exhaustively configurable LLM "framework"; there will be no giant configuration objects, model factories, or if-then-else monsters in the code base. It is a single, cohesive, minimal, readable, hackable, maximally-forkable "strong baseline" codebase designed to run start to end and produce a concrete ChatGPT clone and its report card.
+macOS나 CPU에서도 실행 가능합니다 (성능은 매우 제한적):
 
-Current LLM policy: disclosure. When submitting a PR, please declare any parts that had substantial LLM contribution and that you have not written or that you do not fully understand.
+```bash
+bash runs/runcpu.sh
+```
 
-## Acknowledgements
+## 커스터마이징
 
-- The name (nanochat) derives from my earlier project [nanoGPT](https://github.com/karpathy/nanoGPT), which only covered pretraining.
-- nanochat is also inspired by [modded-nanoGPT](https://github.com/KellerJordan/modded-nanogpt), which gamified the nanoGPT repo with clear metrics and a leaderboard, and borrows a lot of its ideas and some implementation for pretraining.
-- Thank you to [HuggingFace](https://huggingface.co/) for fineweb and smoltalk.
-- Thank you [Lambda](https://lambda.ai/service/gpu-cloud) for the compute used in developing this project.
-- Thank you to chief LLM whisperer 🧙‍♂️ Alec Radford for advice/guidance.
-- Thank you to the repo czar Sofie [@svlandeg](https://github.com/svlandeg) for help with managing issues, pull requests and discussions of nanochat.
+- **정체성 변경**: `dev/gen_jayjun_identity.py`의 템플릿을 수정하여 AI 이름과 성격 변경
+- **언어 비율 조정**: `NANOCHAT_LANG_RATIO` 환경 변수로 영어/한국어 비율 조정 (0.7 = 영어 70%)
+- **모델 크기 변경**: `--depth`, `--aspect-ratio`, `--n-kv-heads` 인자로 모델 구조 조정
+- **학습량 조정**: `--target-param-data-ratio`로 토큰/파라미터 비율 설정 (기본값: 40)
 
-## Cite
+## 테스트
 
-If you find nanochat helpful in your research cite simply as:
+```bash
+python -m pytest tests/ -v
+```
+
+## 감사
+
+- [Andrej Karpathy](https://github.com/karpathy)의 [nanochat](https://github.com/karpathy/nanochat) 프로젝트
+- [HuggingFace](https://huggingface.co/)의 FineWeb, SmolTalk, 한국어 데이터셋
+- [HAERAE-HUB](https://huggingface.co/HAERAE-HUB)의 KMMLU 한국어 벤치마크
+- [NVIDIA](https://huggingface.co/nvidia)의 OpenMathInstruct-2
+
+## 인용
 
 ```bibtex
 @misc{nanochat,
   author = {Andrej Karpathy},
-  title = {nanochat: The best ChatGPT that $100 can buy},
+  title = {nanochat: The best ChatGPT that \$100 can buy},
   year = {2025},
   publisher = {GitHub},
   url = {https://github.com/karpathy/nanochat}
 }
 ```
 
-## License
+## 라이선스
 
 MIT
