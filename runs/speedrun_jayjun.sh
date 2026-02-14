@@ -49,9 +49,15 @@ uv sync --extra gpu
 source .venv/bin/activate
 
 # -----------------------------------------------------------------------------
-# wandb setup (optional)
+# wandb setup
+# To enable wandb logging, set WANDB_RUN before running:
+#   WANDB_RUN=jayjun-v1 bash runs/speedrun_jayjun.sh
+# Or:
+#   export WANDB_RUN=jayjun-v1
+# If not set, defaults to "jayjun" (wandb enabled).
+# Set WANDB_RUN=dummy to disable wandb logging.
 if [ -z "$WANDB_RUN" ]; then
-    WANDB_RUN=dummy
+    WANDB_RUN=jayjun
 fi
 
 # Reset report
@@ -132,9 +138,9 @@ NPROC_PER_NODE=1
 # Pretrain the d20 GQA model (~482M params)
 # GQA 2:1: 6 query heads, 3 KV heads
 # ratio=40: ~19.3B tokens for thorough training
-# device-batch-size=16: vocab_size=65536 creates large logits tensors (B*T*V),
-#   so we need a smaller micro-batch to fit in A100-80GB.
-#   total-batch-size stays at 524288, so grad_accum increases from 4 to 16.
+# device-batch-size=32: vocab_size=65536 logits tensor (B*T*V) = 8 GiB at bs=32,
+#   fits comfortably in A100-80GB (~50-60GB usage).
+#   total-batch-size stays at 524288, so grad_accum = 524288/(32*2048) = 8.
 # Note: The dataloader will use NANOCHAT_LANG_RATIO for 70:30 mixing
 torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_train -- \
     --depth=20 \
@@ -142,7 +148,7 @@ torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_train -- 
     --n-kv-heads=3 \
     --target-param-data-ratio=40 \
     --window-pattern=L \
-    --device-batch-size=16 \
+    --device-batch-size=32 \
     --run=$WANDB_RUN
 
 # Evaluate base model
@@ -156,10 +162,10 @@ echo "=============================================="
 echo "Step 5: Midtraining (JayJun identity + Korean + CoT)"
 echo "=============================================="
 
-# Midtraining: device-batch-size=8 to fit vocab_size=65536 logits in A100-80GB
+# Midtraining: device-batch-size=16 for A100-80GB with vocab_size=65536
 # Includes: SmolTalk, MMLU, GSM8K, Identity, Spelling, KoreanQA(100K),
 #           KoreanSmolTalk, CoTMath(30K), KoreanMMLU(20K)
-torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.mid_train -- --device-batch-size=8 --run=$WANDB_RUN
+torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.mid_train -- --device-batch-size=16 --run=$WANDB_RUN
 torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.chat_eval -- -i mid
 
 # -----------------------------------------------------------------------------

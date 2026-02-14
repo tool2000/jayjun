@@ -88,6 +88,28 @@ bash runs/speedrun_jayjun.sh
 screen -L -Logfile jayjun.log -S jayjun bash runs/speedrun_jayjun.sh
 ```
 
+### wandb 로깅
+
+학습 메트릭은 기본적으로 [Weights & Biases](https://wandb.ai/)에 기록됩니다.
+처음 실행 시 `wandb login`으로 API 키를 설정하세요:
+
+```bash
+pip install wandb
+wandb login
+```
+
+run 이름을 지정하려면 `WANDB_RUN` 환경변수를 설정합니다:
+
+```bash
+WANDB_RUN=jayjun-v1 bash runs/speedrun_jayjun.sh
+```
+
+wandb 로깅을 비활성화하려면:
+
+```bash
+WANDB_RUN=dummy bash runs/speedrun_jayjun.sh
+```
+
 학습이 완료되면 (약 2.5~3.5일) 웹 UI로 대화할 수 있습니다:
 
 ```bash
@@ -110,7 +132,7 @@ python -m scripts.chat_cli -p '안녕하세요! 당신은 누구예요?'
 | 1 | `nanochat.dataset` | 영어(FineWeb-Edu) + 한국어(korean-fineweb-edu) 데이터 다운로드 |
 | 2 | `scripts.tok_train` | 이중언어 BPE 토크나이저 학습 (vocab=65536, 영:한=70:30) |
 | 3 | `dev.gen_jayjun_identity` | JayJun 정체성 대화 데이터 생성 (1000개 템플릿) |
-| 4 | `scripts.base_train` | **사전학습** — d20 GQA 모델, ~19.3B 토큰, batch-size=16 |
+| 4 | `scripts.base_train` | **사전학습** — d20 GQA 모델, ~19.3B 토큰, batch-size=32 |
 | 5 | `scripts.mid_train` | **중간학습** — 대화 형식, 정체성, 한국어 QA, CoT 수학 |
 | 6 | `scripts.chat_sft` | **SFT** — 지도 미세조정, 한국어 강화, 추론 데이터 |
 | 7 | `nanochat.report` | 평가 리포트 생성 |
@@ -189,9 +211,9 @@ A100 80GB에서 기존 1.4B 모델 대비 최적화된 설정:
 
 | 설정 | 기존 (1.4B) | 현재 (0.5B) | 효과 |
 |------|------------|------------|------|
-| device-batch-size (사전학습) | 8 | **16** | vocab_size=65536 logits 텐서(B×T×V)가 크므로 A100-80GB에 맞춤 |
-| grad_accum_steps | 32 | **16** | total-batch-size 동일, grad accum으로 보정 |
-| device-batch-size (중간학습) | 8 | **8** | |
+| device-batch-size (사전학습) | 8 | **32** | vocab_size=65536 logits 텐서(B×T×V) 8GiB, A100-80GB에 맞춤 |
+| grad_accum_steps | 32 | **8** | total-batch-size 동일, grad accum으로 보정 |
+| device-batch-size (중간학습) | 8 | **16** | |
 | device-batch-size (SFT) | 4 | **8** | |
 | 총 학습 시간 | ~6.5일 | **~3-4일** | |
 
